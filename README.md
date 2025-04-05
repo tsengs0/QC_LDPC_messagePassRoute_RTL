@@ -10,31 +10,7 @@ Add the block diagram of the message-pass routing network
 
 ### Development Plan
 
-- RTL impelmentation
-  - [x] Build the RTL modules: L1BS, L1PA and L2PA
-- UVM testbench for verification of the overall routing network
-  - [ ] Build an abstruct simulator using Python 
-  - [ ] Build UVM environment using SystemVerilog
-  - [ ] Build UVM environment using cocotb+pyuvm
-  - [ ] Error free from SystemVerilog-based UVM env.
-  - [ ] Error free from Python-based UVM env.
-- Formal verification for verification of the overall routing network
-  - [ ] Build FV using SymbiYosys (sby)
-  - [ ] Error free from the sby-based FV env.
-- ASIC synthesis
-  - [ ] Build Yosys synthesis env.
-  - [ ] Build Design Compiler env.
-- FPGA emulation
-  - [ ] Build an FPGA synthesis env.
-  - [ ] PL <--> PC communication via PYNQ
-- Automatic RTL generator
-  - [ ] Arrange the existing Python-base RTL generator
-  - [ ] Write a script to automatically launch the regression test using the both UVM testbench and FV env.
-  - [ ] Write a script to automate the ASIC synthesis process
-- Documentation about how to use this RTL generator
-  - [ ] Design specification including the I/F table and block diagram 
-  - [ ] Markdown version
-  - [ ] LaTex version
+Please refer to the detail here: [development_plan.md](doc/development_plan.md)
  
 ---
 
