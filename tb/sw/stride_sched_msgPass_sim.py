@@ -7,7 +7,11 @@ import os
 # Pre-processor
 DONT_CARE_MACRO = np.uint32(65535)
 
-class permutationNetwork:
+# Message-pass routing network subsystem
+#    1) Simulator
+#    2) RTL module control signal generation
+#    3) HW/SW co-verification
+class msgPass_route_ss:
 	def __init__(self):
 		## Decoder configuration
 		self.block_length = 7650
@@ -20,8 +24,8 @@ class permutationNetwork:
 		self.cardinality = pow(2, self.q) # by exploiting the symmetry of CNU, 3-Gbit input is enough
 		self.Iter_max = 10
 		## Permutation network configuration
-		self.Pc=51
-		self.bs_length=self.Pc
+		self.P_r=51
+		self.bs_length=self.P_r
 		self.rowSplit_factor=5
 		self.parallel_col_num = math.ceil(self.CN_DEGREE / self.rowSplit_factor)
 		self.BaseMatrix=np.array([
@@ -35,36 +39,36 @@ class permutationNetwork:
 		self.bs_shift=np.zeros((self.layer_num, self.CN_DEGREE), dtype=np.uint32)
 		
 		## The access addresses for the corresponding devices and pages, where the 
-		## 	a) each Pc-length BS input by Pc number of devices
-		## 	b) each Pc-length BS output by Pc number of devices
+		## 	a) each P_{r}-length BS input by P_{r} number of words
+		## 	b) each P_{r}-length BS output by P_{r} number of words
 		col_size=self.CN_DEGREE*self.Z
-		self.bs_deviceAddr=np.empty((self.layer_num, col_size), dtype=np.uint32)
 		self.bs_pageAddr=np.empty((self.layer_num, col_size), dtype=np.uint32)
+		self.bs_wordAddr=np.empty((self.layer_num, col_size), dtype=np.uint32)
 
 		# To generate vector of permutation outputs
-		self.bsOut_vec = np.empty((self.layer_num, self.CN_DEGREE, int(self.Z / self.Pc), self.Pc), dtype=np.uint32)
-		self.pageAddr_out_vec = np.empty((self.layer_num, self.CN_DEGREE, int(self.Z / self.Pc), self.Pc), dtype=np.uint32)
+		self.bsOut_vec = np.empty((self.layer_num, self.CN_DEGREE, int(self.Z / self.P_r), self.P_r), dtype=np.uint32)
+		self.pageAddr_out_vec = np.empty((self.layer_num, self.CN_DEGREE, int(self.Z / self.P_r), self.P_r), dtype=np.uint32)
 
 		## Configuration of naive folded permutation
-		self.naive_rowChunk_num=int(self.Z / self.Pc)
+		self.naive_rowChunk_num=int(self.Z / self.P_r)
 
 		## Configuration of stride-access folded permutation
 		# Stride access decomposition
-		self.stride_width=5
-		self.stride_chunk_num = math.ceil(self.naive_rowChunk_num / self.stride_width)
-		self.strideBs_Latency=int(self.Z/(self.Pc*self.stride_width)) # the total latency to complete permutation in a stride access manner
+		self.W_s=5
+		self.stride_chunk_num = math.ceil(self.naive_rowChunk_num / self.W_s)
+		self.strideBs_Latency=int(self.Z/(self.P_r*self.W_s)) # the total latency to complete permutation in a stride access manner
 
 		#=========================================================================
 		#Memory emulation
 		#=========================================================================
-		self.naive_fold_mailbox=np.empty((self.layer_num, self.CN_DEGREE, int(self.Z / self.Pc), self.Pc), dtype=np.uint32)
+		self.naive_fold_mailbox=np.empty((self.layer_num, self.CN_DEGREE, int(self.Z / self.P_r), self.P_r), dtype=np.uint32)
 		#=========================================================================
 		#End of memory emulation
 		#=========================================================================
 		# Shift control files exporting
 		self.SHIFT_CTRL_FOLDER = "z" + str(self.Z) + \
 							"_Pr" + str(self.bs_length) + \
-							"_Ws" + str(self.stride_width)
+							"_Ws" + str(self.W_s)
 
 		# End of "Shift control files exporting"
 		# =========================================================================
@@ -78,17 +82,18 @@ class permutationNetwork:
 		return vec_out
 
 	def permutation_implementation_test(self):
-		vec_in=np.arange(self.Pc, dtype=np.uint32)
-		for i in range(self.Pc):
-			vec_out = self.permutation(vec_in=vec_in, permutation_len=self.Pc, shift_factor=i)
+		vec_in=np.arange(self.P_r, dtype=np.uint32)
+		for i in range(self.P_r):
+			vec_out = self.permutation(vec_in=vec_in, permutation_len=self.P_r, shift_factor=i)
 			print("Shift_run_%d" % (i), vec_out)
 
 	def display(self):
 		print("Base Matrix:\n", self.BaseMatrix)
 		print("\n")
-		print("DA:\n", self.bs_deviceAddr)
+		print("DA:\n", self.bs_pageAddr)
 		print("\n")
 		print("PA:\n", self.bs_pageAddr)
+
 
 	# Index of shifted message in a segment (or called row chunk)
 	def segment_pos(self, s, t, sub_size, seg_size):
@@ -107,9 +112,9 @@ class permutationNetwork:
 					shift_acc=0;
 					for acc_id in range(layer_id):
 						shift_acc = shift_acc + self.bs_shift[acc_id][sub_matrix_id]
-					interLayer_offset=self.Pc-int(shift_acc % self.Pc)
+					interLayer_offset=self.P_r-int(shift_acc % self.P_r)
 				else:
-					interLayer_offset=abs(int((self.Z- layer_0_shift) % self.Pc)-int((self.Z- layer_1_shift) % self.Z))
+					interLayer_offset=abs(int((self.Z- layer_0_shift) % self.P_r)-int((self.Z- layer_1_shift) % self.Z))
 
 				self.bs_shift[layer_id][sub_matrix_id]=interLayer_offset
 
@@ -117,10 +122,10 @@ class permutationNetwork:
 				row_chunk_cnt=0
 				for col in range(self.Z):
 					pcm_col=(sub_matrix_id*self.Z)+col
-					self.bs_deviceAddr[layer_id][pcm_col]=self.segment_pos(layer_1_shift, (col+layer_0_shift) % self.Z, self.Z, self.Pc)
-					self.bs_pageAddr[layer_id][pcm_col]=self.segment(layer_1_shift, (col+layer_0_shift) % self.Z, self.Z, self.Pc)
+					self.bs_pageAddr[layer_id][pcm_col]=self.segment_pos(layer_1_shift, (col+layer_0_shift) % self.Z, self.Z, self.P_r)
+					self.bs_pageAddr[layer_id][pcm_col]=self.segment(layer_1_shift, (col+layer_0_shift) % self.Z, self.Z, self.P_r)
 					#if(layer_id==0 and sub_matrix_id==1):
-					#	print("[%d] -> PA: %d, DA: %d\n" % (col, self.bs_pageAddr[layer_id][pcm_col], self.bs_deviceAddr[layer_id][pcm_col]))
+					#	print("[%d] -> PA: %d, DA: %d\n" % (col, self.bs_pageAddr[layer_id][pcm_col], self.bs_pageAddr[layer_id][pcm_col]))
 
 	def stride_unitAddr_cal(self, pcm_col, layer_id):
 		stride_front=self.Z*pcm_col
@@ -128,9 +133,9 @@ class permutationNetwork:
 		bsOut_vec=np.zeros(self.Z, dtype=np.uint32)
 		pageAddr_out_vec=np.zeros(self.Z, dtype=np.uint32)
 		for stride_iter in range(self.strideBs_Latency):
-			for stride_id in range(self.stride_width):
-				for bsIn_id in range(self.Pc):
-					bsOut_vec[relative_stride_rear]=self.bs_deviceAddr[layer_id][stride_front+relative_stride_rear]
+			for stride_id in range(self.W_s):
+				for bsIn_id in range(self.P_r):
+					bsOut_vec[relative_stride_rear]=self.bs_pageAddr[layer_id][stride_front+relative_stride_rear]
 					pageAddr_out_vec[relative_stride_rear]=self.bs_pageAddr[layer_id][stride_front+relative_stride_rear]
 					# After bs
 					#if(layer_id==0 and pcm_col==1):
@@ -151,15 +156,15 @@ class permutationNetwork:
 			for pcm_col in range(self.CN_DEGREE):
 				#print("Base Matrix Column_%d" % (pcm_col), "\n\n")
 				da, pa = self.stride_unitAddr_cal(pcm_col=pcm_col, layer_id=layer_id)
-				self.bsOut_vec[layer_id][pcm_col] = np.array(da).reshape(-1, self.Pc)
-				self.pageAddr_out_vec[layer_id][pcm_col] = np.array(pa).reshape(-1, self.Pc)
+				self.bsOut_vec[layer_id][pcm_col] = np.array(da).reshape(-1, self.P_r)
+				self.pageAddr_out_vec[layer_id][pcm_col] = np.array(pa).reshape(-1, self.P_r)
 				#print("Device addresses:\n", self.bsOut_vec[layer_id][pcm_col])
 				#print("\n")
 				#print("Page addresses:\n", self.pageAddr_out_vec[layer_id][pcm_col])
 				#print("\n----------------------------------------------------------------------------------------------------------------------\n")
 
 	def naive_fold_permutation(self, vec_in, row_chunk_id, pcm_col, layer_id):
-		for i in range(self.Pc):
+		for i in range(self.P_r):
 			device_addr=self.bsOut_vec[layer_id][pcm_col][row_chunk_id][i]
 			page_addr=self.pageAddr_out_vec[layer_id][pcm_col][row_chunk_id][i]
 
@@ -171,7 +176,7 @@ class permutationNetwork:
 		# To collect every element's corresponding vote
 		intersaction_strideIDs = np.empty(len(common_intersection), dtype=np.int32)
 		for i in range(len(common_intersection)):
-			intersaction_strideIDs[i] = int(common_intersection[i] / self.stride_width)
+			intersaction_strideIDs[i] = int(common_intersection[i] / self.W_s)
 
 		candidates = np.unique(np.array(intersaction_strideIDs)) # To identify all distinct candidates for the following majority vote
 
@@ -203,33 +208,33 @@ class permutationNetwork:
 
 	#
 	def page_alignment_configGen(self, layer_id):
-		#bs = permutationNetwork(permutation_length=self.Pc)
+		#bs = permutationNetwork(permutation_length=self.P_r)
 		# bs.permutation_implementation_test()
 
 		# To generate vector of permutation inputs
 		vec_in = np.arange(self.block_length * self.layer_num, dtype=np.uint32)
 		self.stride_addr_config()
 
-		submatrix_col_sets = np.arange((self.stride_width+1)*self.stride_chunk_num*self.submatrix_col_num).reshape(self.submatrix_col_num, self.stride_chunk_num, (self.stride_width+1))
+		submatrix_col_sets = np.arange((self.W_s+1)*self.stride_chunk_num*self.submatrix_col_num).reshape(self.submatrix_col_num, self.stride_chunk_num, (self.W_s+1))
 		for submatrix_col_id in range(0, self.submatrix_col_num, 1):
 			for row_chunk_id in range(self.stride_chunk_num):
 				#print("/*--------------------------------------------*/")
 				#print("// Pipeline stage ", row_chunk_id)
 				#print("/*--------------------------------------------*/")
 				for device_id in range(self.bs_length):
-					for stride_id in range(self.stride_width):
+					for stride_id in range(self.W_s):
 						if (device_id == 0 and stride_id == 0):
-							set_temp = self.pageAddr_out_vec[layer_id][submatrix_col_id][(row_chunk_id * self.stride_width) + stride_id][device_id]
+							set_temp = self.pageAddr_out_vec[layer_id][submatrix_col_id][(row_chunk_id * self.W_s) + stride_id][device_id]
 						else:
-							set_temp = np.union1d(set_temp, self.pageAddr_out_vec[layer_id][submatrix_col_id][(row_chunk_id * self.stride_width) + stride_id][device_id])
-						#print(bs.pageAddr_out_vec[layer_id][submatrix_col_id][(row_chunk_id * bs.stride_width) + stride_id][device_id], end=",\t")
+							set_temp = np.union1d(set_temp, self.pageAddr_out_vec[layer_id][submatrix_col_id][(row_chunk_id * self.W_s) + stride_id][device_id])
+						#print(bs.pageAddr_out_vec[layer_id][submatrix_col_id][(row_chunk_id * bs.W_s) + stride_id][device_id], end=",\t")
 					#print("")
 
 				#print("Submatrix_col_", submatrix_col_id, " -> Union set:", end=" ")
 				#print(set_temp)
 
 				# To avoid any mismatch of the union set size
-				set_temp_size_gap = self.stride_width+1-len(set_temp)
+				set_temp_size_gap = self.W_s+1-len(set_temp)
 				if set_temp_size_gap != 0:
 					for zero_pad in range(set_temp_size_gap):
 						set_temp = np.append(set_temp, DONT_CARE_MACRO)
@@ -267,7 +272,7 @@ class permutationNetwork:
 		return Dict_pageAlign_info_ref
 
 	def stride_shift_calc(self, isRef, layer_id, stride_chunk_id, sumbmatrix_col_id):
-		aligned_pattern_id = np.empty((self.Pc, self.stride_width), dtype=np.uint32)
+		aligned_pattern_id = np.empty((self.P_r, self.W_s), dtype=np.uint32)
 		shift_factors = np.empty(self.bs_length, dtype=np.uint32)
 		Dict_pageAlign_info = {
 			'shift_factor': shift_factors,
@@ -275,21 +280,21 @@ class permutationNetwork:
 		}
 
 		# To prepare each x_{i} in X, for i = 0, 1, ..., P_{r}-1
-		X = np.zeros((self.bs_length, self.stride_width), dtype=np.uint32)
+		X = np.zeros((self.bs_length, self.W_s), dtype=np.uint32)
 		for i in range(self.bs_length):
-			for stride_id in range(self.stride_width):
-					relative_deviceID = self.bsOut_vec[layer_id][sumbmatrix_col_id][(stride_chunk_id * self.stride_width) + stride_id][i]
-					X[relative_deviceID][stride_id] = self.pageAddr_out_vec[layer_id][sumbmatrix_col_id][(stride_chunk_id * self.stride_width) + stride_id][i]
+			for stride_id in range(self.W_s):
+					relative_deviceID = self.bsOut_vec[layer_id][sumbmatrix_col_id][(stride_chunk_id * self.W_s) + stride_id][i]
+					X[relative_deviceID][stride_id] = self.pageAddr_out_vec[layer_id][sumbmatrix_col_id][(stride_chunk_id * self.W_s) + stride_id][i]
 
 		# To determine the (circularly) right-shift factor for the reference sub-matrix column
 		i=0;
 
 		# To create and save a header to CSV file
-		l1bs_relRowChunkID_list = [stride_chunk for stride_chunk in range(0, self.stride_width)] # header
-		l1pa_relRowChunkID_list = [stride_chunk for stride_chunk in range(0, self.stride_width)]  # header
-		for t in range(self.stride_width):
+		l1bs_relRowChunkID_list = [stride_chunk for stride_chunk in range(0, self.W_s)] # header
+		l1pa_relRowChunkID_list = [stride_chunk for stride_chunk in range(0, self.W_s)]  # header
+		for t in range(self.W_s):
 			l1bs_relRowChunkID_list[t] = 'relRowChunk_'+str(t)+'(L1BS)'
-		for t in range(self.stride_width):
+		for t in range(self.W_s):
 			l1pa_relRowChunkID_list[t] = 'relRowChunk_'+str(t)+'(L1PA)'
 
 		# To export the page addresses for shifted messages by L1BS to .CSV file
@@ -298,10 +303,10 @@ class permutationNetwork:
 
 		for x_i in X:
 			# To search the index of referenced list of which the referenced_list[cnt_ref] == max_list[cnt_max]
-			for cnt_max in range(self.stride_width):
-				for cnt_ref in range(self.stride_width):
+			for cnt_max in range(self.W_s):
+				for cnt_ref in range(self.W_s):
 					aligned_pattern_id[i][cnt_max] = cnt_ref
-					if cnt_ref > self.stride_width:
+					if cnt_ref > self.W_s:
 						print("---------------", cnt_ref)
 						pass
 					break
@@ -316,24 +321,24 @@ class permutationNetwork:
 					found_index = cnt
 					flag = 1
 				else:
-					if cnt == self.stride_width-1:
+					if cnt == self.W_s-1:
 						cnt = 0
 						first_index = first_index + 1
 					else:
 						cnt = cnt + 1
 
-			found_index = x_i[0] % self.stride_width
+			found_index = x_i[0] % self.W_s
 			l1pa_shift = found_index-first_index
 			if l1pa_shift < 0:
-				l1pa_shift = self.stride_width + l1pa_shift
+				l1pa_shift = self.W_s + l1pa_shift
 			else:
 				l1pa_shift = l1pa_shift
 
 			Dict_pageAlign_info['shift_factor'][i] = l1pa_shift
-			aligned_patterns = np.empty(self.stride_width, dtype=np.uint32)
-			aligned_patterns_str = np.empty(self.stride_width, dtype=object)
-			for pattern_id in range(self.stride_width):
-				shifted_id = (pattern_id+l1pa_shift) % self.stride_width
+			aligned_patterns = np.empty(self.W_s, dtype=np.uint32)
+			aligned_patterns_str = np.empty(self.W_s, dtype=object)
+			for pattern_id in range(self.W_s):
+				shifted_id = (pattern_id+l1pa_shift) % self.W_s
 				aligned_patterns[shifted_id] = x_i[pattern_id]
 				# to identify whether the aligned elements is "Don't care value" or real value
 				str_temp = str(aligned_patterns[shifted_id])
@@ -376,7 +381,7 @@ def main_page_align():
 
 def permutation_emulation():
 	if (len(sys.argv) != 2):
-		print("Please give the Pc")
+		print("Please give the P_\{r\}")
 		sys.exit()
 	bs = permutationNetwork()
 	bs.permutation_length=int(sys.argv[1])
@@ -401,8 +406,8 @@ def permutation_emulation():
 				shift_factor=bs.BaseMatrix[layer_id][pcm_col]
 			)
 			for chunk_id in range(bs.naive_rowChunk_num):
-				chunk_front = (chunk_id * bs.Pc)
-				chunk_rear = (chunk_id + 1) * bs.Pc - 1
+				chunk_front = (chunk_id * bs.P_r)
+				chunk_rear = (chunk_id + 1) * bs.P_r - 1
 				bs.naive_fold_permutation(
 					vec_in=fold_vec_out_curLayer[chunk_front:chunk_rear + 1],
 					row_chunk_id=chunk_id,
@@ -419,8 +424,8 @@ def permutation_emulation():
 
 			err_cnt = 0
 			for dev_id in range(bs.Z):
-				naive_unfold_pageAddr = math.floor(dev_id / bs.Pc)
-				naive_unfold_deviceAddr = int(dev_id % bs.Pc)
+				naive_unfold_pageAddr = math.floor(dev_id / bs.P_r)
+				naive_unfold_deviceAddr = int(dev_id % bs.P_r)
 				# To emulate the read operation of Msg-Pass MEMs
 				mailbox_recv = bs.naive_fold_mailbox[layer_id][pcm_col][naive_unfold_pageAddr][naive_unfold_deviceAddr]
 				if (unfold_vec_out[dev_id] == mailbox_recv):
