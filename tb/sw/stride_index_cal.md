@@ -1,8 +1,8 @@
 For $i = 0, 1, \cdots, d_{v}-1$ and $j = 0, 1, \cdots d_{c}-1$, the shift control signal for a circular shifter to perform the message passing at $i$ th layer of $j$ th submatrix column is
 
-```math
+$$
     N_{fg} = P_{r}
-```
+$$
 
 ```math
     N_{strd} = \lceil Z / N_{fg} \rceil

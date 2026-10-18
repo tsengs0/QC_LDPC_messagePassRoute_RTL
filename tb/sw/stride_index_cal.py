@@ -13,7 +13,6 @@ from typing import List
 import gc
 from collections import defaultdict
 
-
 # Global configuration for the subsequent simulation/emulation environment
 
 # In[1018]:
@@ -23,7 +22,6 @@ global DEBUG_VERBOSE_LEVEL_0
 global DEBUG_VERBOSE_LEVEL_1
 DEBUG_VERBOSE_LEVEL_0 = False
 DEBUG_VERBOSE_LEVEL_1 = False
-
 
 # ## Page and word addresses generation
 
@@ -48,7 +46,7 @@ layerSh_rom_page_dtype_1 = np.dtype([
 class msgPass_buffer_ctrl:
 	I_new_col_0 = None
 	I_new_col_t = None
-
+	
 	def __init__(self, msgPass_sched: str, baseMatrix_row_num: int, baseMatrix_col_num: int, Z: int, N_rc: int, U: int, W_s: int, P_c: int, P_r: int):
 		self.msgPass_sched = msgPass_sched
 		self.baseMatrix_row_num = baseMatrix_row_num
@@ -84,20 +82,19 @@ class msgPass_buffer_ctrl:
 	def new_col_normalisation(self, t: int, shift_factor: int):
 		self.I_new_col_0 = self.Z-shift_factor
 		self.I_new_col_t = (self.I_new_col_0+t) % self.Z
-
+		
 	def page_addr_gen(self, t: int, shift_factor: int):
 		self.new_col_normalisation(t=t, shift_factor=shift_factor)
 		if(self.msgPass_sched=="stride_sched"):
 			page_addr=self.I_new_col_t % self.N_rc
 		return page_addr
-
+	
 	def word_addr_gen(self, t: int, shift_factor: int):
 		self.new_col_normalisation(t=t, shift_factor=shift_factor)
 		if(self.msgPass_sched=="stride_sched"):
 			word_addr=math.floor(self.I_new_col_t / self.N_rc)
 		return word_addr	
-
-
+	
 
 # ## Configuration of the decoder architecture
 # - Parallelism in rows and columns of the target parity-check matrix (expanded from a given base matrix)
@@ -140,7 +137,6 @@ msgPass_buffer_ctrl_inst = msgPass_buffer_ctrl(
     P_r=P_r,
     P_c=P_c
 )
-
 
 # 
 
@@ -202,7 +198,6 @@ msgPass_buffer_norm = msgPass_buffer_permMsg_write(
 )
 
 #print(msgPass_buffer_norm)
-
 
 # The next section will address the cyclic shfit factor for each row chunk.
 
@@ -274,7 +269,6 @@ for bm_row in range(baseMatrix_row_num):
 
 #print(f"abs_rowChunk_shfit_factor_vec: {abs_rowChunk_shfit_factor_vec}")
 
-
 # # Algorithm - Message Passing Procedures for the Computed V2C Messages
 
 # - StrideUnit-to-message converter: to obtain the indices of stride unit and relative row chunk that $t$-th message is mapped to 
@@ -315,7 +309,6 @@ for t in range(Z):
 	if t not in R[u][i]:
 		print(f"Error: t={t} u={u} i={i} R[u][i]={R[u][i]}") # Error: t is not in the list of R[u][i]
 
-
 # # Emulation of Layer-Shift ROM
 # 
 # The Layer-shift ROM contains two memory regions storing: 1) the cyclic shift factors, and 2) page addresses for the cyclic shifted row chunks
@@ -351,7 +344,7 @@ for bm_row in range(baseMatrix_row_num):
             rel_rowChunk_id_vec.append(rel_rowChunk_id)
             stride_unit_id_vec.append(stride_unit_id)
             #print(f"submatrix({bm_row}, {bm_col})_codebit: {t}|\t->\t| Row chunk for i-th layer:\t {abs_rowChunk_id} (absolute) at stride unit {stride_unit_id} converted to {rel_rowChunk_id} (relative) at stride unit {stride_unit_id}")
-
+        
             hat_abs_rowChunk_id = msgPass_buffer_ctrl_inst.page_addr_gen(t=t, shift_factor=S_i_j[(bm_row+1) % baseMatrix_row_num][bm_col])
             hat_rel_rowChunk_id = hat_abs_rowChunk_id % W_s
             hat_stride_unit_id = math.floor(hat_abs_rowChunk_id / W_s)
@@ -414,7 +407,7 @@ for bm_row in range(baseMatrix_row_num):
             msgPass_buffer_ctrl_inst.page_waddr_vec[rel_bm_col][rel_rowChunk_id][bm_row][cur_stride_unit+page_addr_base]['stride_unit'] = hat_stride_unit
             msgPass_buffer_ctrl_inst.page_waddr_vec[rel_bm_col][rel_rowChunk_id][bm_row][cur_stride_unit+page_addr_base]['rel_row_chunk'] = hat_rel_rowChunk_id_vec[abs_row_chunk]
             #print(f"Submatrix({bm_row}, {bm_col}), StrideUnit_{cur_stride_unit}, RelRowChunk_{rel_rowChunk_id} -> StrideUnit_{hat_stride_unit}, RelRowChunk_{hat_rel_rowChunk_id_vec[abs_row_chunk]}: {msgPass_buffer_ctrl_inst.page_waddr_vec[rel_bm_col][rel_rowChunk_id][bm_row][cur_stride_unit+page_addr_base]}")
-
+        
         del abs_rowChunk_id_vec
         del rel_rowChunk_id_vec
         del stride_unit_id_vec
@@ -422,7 +415,7 @@ for bm_row in range(baseMatrix_row_num):
         del hat_rel_rowChunk_id_vec
         del hat_stride_unit_id_vec
         gc.collect() # For garbage collection
-
+ 
 
 
 # Let's confirm the content of the generated cyclic shift factors and page waddr values.
@@ -468,7 +461,6 @@ msgPass_buffer = np.zeros(
 	),
 	dtype=np.int32
 )
-
 
 # To preload the sample channel messages (input LLR values) to the message-pass buffers where the message positions are all aligned with the cyclic shift consequences of the submatrices in the first decoding layer.
 # 
@@ -534,7 +526,7 @@ def msgPass_stride_sched(
 
 				# Wirte back the permV2C
 				msgPass_buffer[rel_bm_col][rc_waddr][layer_next][stride_unit_waddr+rel_bm_col_cnt*U][hat_j] = y_fetch_compV2C+prefix_for_verification*layer
-
+			
 			# == For fine-grained debug (1) =========================================================================================
 			if(DEBUG_VERBOSE_LEVEL_1==True):
 				print(f"\t\t\t\tFetch compV2Cs from msgPass_buffer[{rel_bm_col}][{rel_row_chunk}][{layer}][{stride_unit+rel_bm_col_cnt*U}]")
@@ -567,7 +559,7 @@ if(DEBUG_VERBOSE_LEVEL_0==True):
 			for rel_bm_col in range(P_c):
 				msgPass_buffer_dump(layer=layer, rel_bm_col=rel_bm_col, rel_bm_col_cnt=rel_bm_col_cnt)
 	print("------------------------------------------------------------------------")
-
+	
 for layer in range(baseMatrix_row_num):
 	layer_next = (layer+1) % baseMatrix_row_num
 	for bm_col in range(baseMatrix_col_num):
@@ -628,4 +620,3 @@ for rel_bm_col_cnt in range(math.ceil(baseMatrix_col_num / P_c)):
 			print(f"Relative base-matrix column {rel_bm_col} with rel_bm_col_cnt-{rel_bm_col_cnt}: Passed")
 		else:
 			print(f"Relative base-matrix column {rel_bm_col} with rel_bm_col_cnt-{rel_bm_col_cnt}: Failed")
-
